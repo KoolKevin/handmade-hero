@@ -15,30 +15,32 @@ typedef int16_t int16;
 typedef int32_t int32;
 typedef int64_t int64;
 
+struct win32OffscreenBuffer {
+    BITMAPINFO info;
+    void* memory;
+    int width;
+    int height;
+    int bytesPerPixel;
+    int stride;
+};
+
 // TODO: a global for now
 global_variable bool running;
-global_variable BITMAPINFO bitmapInfo;
-global_variable void *bitmapMemory;
-global_variable int bitmapWidth;
-global_variable int bitmapHeight;
-global_variable int bytesPerPixel = 4;
+global_variable win32OffscreenBuffer globalBackbuffer;
+
 
 internal void
-renderGradient(int XOffset, int YOffset)
+renderGradient(win32OffscreenBuffer buffer, int XOffset, int YOffset)
 {
-
-    int width = bitmapWidth;
-
     // good way to write pixel loops. usiamo esplicitamente un
     // row pointer aggiuntivo dato che non è detto che il pixel
     // pointer sia allineato con la prossima riga alla fine del
     // loop interno
-    int stride = width * bytesPerPixel;
-    uint8 *row = (uint8 *)bitmapMemory;
-    for (int Y = 0; Y < bitmapHeight; Y++)
+    uint8 *row = (uint8 *)buffer.memory;
+    for (int Y = 0; Y < buffer.height; Y++)
     {
         uint32 *pixel = (uint32 *)row;
-        for (int X = 0; X < bitmapWidth; X++)
+        for (int X = 0; X < buffer.width; X++)
         {
             uint8 red = (uint8)(X + XOffset);
             uint8 green = (uint8)(Y + YOffset);
@@ -48,42 +50,44 @@ renderGradient(int XOffset, int YOffset)
             pixel++;
         }
 
-        row += stride;
+        row += buffer.stride;
     }
 }
 
 // DIB == DeviceIndipendentBitmap
 //     == buffer in cui scrivere cosa disegnare
 internal void
-win32ResizeDIBSection(int width, int height)
+win32ResizeDIBSection(win32OffscreenBuffer* buffer, int width, int height)
 {
-    if (bitmapMemory)
+    if (buffer->memory)
     {
-        VirtualFree(bitmapMemory, 0, MEM_RELEASE);
+        VirtualFree(buffer->memory, 0, MEM_RELEASE);
     }
 
-    bitmapInfo.bmiHeader.biSize = sizeof(bitmapInfo.bmiHeader);
-    bitmapInfo.bmiHeader.biWidth = width;
-    bitmapInfo.bmiHeader.biHeight = -height; // origin in alto a sinistra
-    bitmapInfo.bmiHeader.biPlanes = 1;
-    bitmapInfo.bmiHeader.biBitCount = 32;
-    bitmapInfo.bmiHeader.biCompression = BI_RGB;
+    buffer->info.bmiHeader.biSize = sizeof(buffer->info.bmiHeader);
+    buffer->info.bmiHeader.biWidth = width;
+    buffer->info.bmiHeader.biHeight = -height; // origin in alto a sinistra
+    buffer->info.bmiHeader.biPlanes = 1;
+    buffer->info.bmiHeader.biBitCount = 32;
+    buffer->info.bmiHeader.biCompression = BI_RGB;
 
-    bitmapWidth = width;
-    bitmapHeight = height;
+    buffer->width = width;
+    buffer->height = height;
 
     // 3 bytes of data + 1 for word alignment
-    int bitmapMemorySize = 4 * width * height;
-    bitmapMemory = VirtualAlloc(0, bitmapMemorySize, MEM_COMMIT, PAGE_READWRITE);
+    buffer->bytesPerPixel = 4;
+    int bitmapMemorySize = buffer->bytesPerPixel * width * height;
+    buffer->memory = VirtualAlloc(0, bitmapMemorySize, MEM_COMMIT, PAGE_READWRITE);
+    buffer->stride = width * buffer->bytesPerPixel;
 
     // TODO: probably want to clear this to black
 }
 
 internal void
-win32UpdateWindow(HDC deviceContext, RECT *windowRect, int X, int Y, int width, int height)
+win32CopyBufferToWindow(win32OffscreenBuffer buffer, HDC deviceContext, RECT clientRect, int X, int Y, int width, int height)
 {
-    int windowWidth = windowRect->right - windowRect->left;
-    int windowHeight = windowRect->bottom - windowRect->top;
+    int windowWidth = clientRect.right - clientRect.left;
+    int windowHeight = clientRect.bottom - clientRect.top;
     // copia i bit da un buffer e li disegna nel DC
     // applicando opportuno stretch
     int res = StretchDIBits(
@@ -93,9 +97,9 @@ win32UpdateWindow(HDC deviceContext, RECT *windowRect, int X, int Y, int width, 
         // X, Y, width, height, // src
         // full window redraw
         0, 0, windowWidth, windowHeight, // dst
-        0, 0, bitmapWidth, bitmapHeight, // src
-        bitmapMemory,
-        &bitmapInfo,
+        0, 0, buffer.width, buffer.height, // src
+        buffer.memory,
+        &buffer.info,
         DIB_RGB_COLORS,
         SRCCOPY);
 }
@@ -110,78 +114,73 @@ LRESULT CALLBACK win32MainWindowCallback(
     // interessante usare blocchi con switch per
     // non far propagare variabili locali di un
     // case ad altri case
-    switch (message)
-    {
-    case WM_SIZE:
-    {
-        OutputDebugStringA("WM_SIZE\n");
+    switch (message) {
+        case WM_SIZE:
+        {
+            OutputDebugStringA("WM_SIZE\n");
 
-        RECT clientRect;
-        GetClientRect(window, &clientRect);
-        int width = clientRect.right - clientRect.left;
-        int height = clientRect.bottom - clientRect.top;
-        win32ResizeDIBSection(width, height);
-    }
-    break;
+            RECT clientRect;
+            GetClientRect(window, &clientRect);
+            int width = clientRect.right - clientRect.left;
+            int height = clientRect.bottom - clientRect.top;
+            win32ResizeDIBSection(&globalBackbuffer, width, height);
+        } break;
 
-    case WM_DESTROY:
-    {
-        OutputDebugStringA("WM_DESTROY\n");
-        running = false;
-    }
-    break;
+        // messaggio inviato quando è necessario ridisegnare la
+        // finestra (e.g. espansione, la spostiamo out-of-view, ...)
+        case WM_PAINT:
+        {
+            OutputDebugStringA("WM_PAINT\n");
 
-    case WM_CLOSE:
-    {
-        OutputDebugStringA("WM_CLOSE\n");
-        running = false;
-    }
-    break;
+            // BeginPaint ci restituisce un oggetto importante: DeviceContext
+            // It acts as a wrapper that combines:
+            // - The Drawing Canvas (Where to draw: a window's display area,
+            //   an off-screen bitmap, or even a printer page).
+            // - The Drawing Attributes (How to draw: current brush color,
+            //   pen thickness, font, clipping region, and background mode).
+            //
+            // Inoltre, la sottostruttura rcPaint rappresenta la sola zona dirty
+            // che deve essere ridisegnata e non l'intera finestra (per questa
+            // ha anche delle coordinate X,Y come punto d'inizio)
+            PAINTSTRUCT paint;
+            HDC deviceContext = BeginPaint(window, &paint);
+            int X = paint.rcPaint.left;
+            int Y = paint.rcPaint.top;
+            int width = paint.rcPaint.right - paint.rcPaint.left;
+            int height = paint.rcPaint.bottom - paint.rcPaint.top;
 
-    case WM_ACTIVATEAPP:
-    {
-        OutputDebugStringA("WM_ACTIVATEAPP\n");
-    }
-    break;
+            // getClientRect(), diversametne da rcPaint, restituisce le dimensioni
+            // totali dell'area interna della finestra (escludendo i bordi, la
+            // barra del titolo e i menu) e non solo la zona dirty
+            RECT clientRect;
+            GetClientRect(window, &clientRect);
+            win32CopyBufferToWindow(globalBackbuffer, deviceContext, clientRect, X, Y, width, height);
+            EndPaint(window, &paint);
+        } break;
 
-    // messaggio inviato quando è necessario ridisegnare la
-    // finestra (e.g. espansione, la spostiamo out-of-view, ...)
-    case WM_PAINT:
-    {
-        OutputDebugStringA("WM_PAINT\n");
+        case WM_DESTROY:
+        {
+            OutputDebugStringA("WM_DESTROY\n");
+            running = false;
+        } break;
 
-        // BeginPaint ci restituisce un oggetto importante: DeviceContext
-        // It acts as a wrapper that combines:
-        // - The Drawing Canvas (Where to draw: a window's display area,
-        //   an off-screen bitmap, or even a printer page).
-        // - The Drawing Attributes (How to draw: current brush color,
-        //   pen thickness, font, clipping region, and background mode).
-        //
-        // Inoltre, la sottostruttura rcPaint rappresenta la sola zona dirty
-        // che deve essere ridisegnata e non l'intera finestra (per questa
-        // ha anche delle coordinate X,Y come punto d'inizio)
-        PAINTSTRUCT paint;
-        HDC deviceContext = BeginPaint(window, &paint);
-        int X = paint.rcPaint.left;
-        int Y = paint.rcPaint.top;
-        int width = paint.rcPaint.right - paint.rcPaint.left;
-        int height = paint.rcPaint.bottom - paint.rcPaint.top;
+        case WM_CLOSE:
+        {
+            OutputDebugStringA("WM_CLOSE\n");
+            running = false;
+        } break;
 
-        // getClientRect(), diversametne da rcPaint, restituisce le dimensioni
-        // totali dell'area interna della finestra (escludendo i bordi, la
-        // barra del titolo e i menu) e non solo la zona dirty
-        RECT clientRect;
-        GetClientRect(window, &clientRect);
-        win32UpdateWindow(deviceContext, &clientRect, X, Y, width, height);
-        EndPaint(window, &paint);
-    }
-    break;
-    default:
-    {
-        // callback di default di windows per gestire
-        // messaggi che non mi interessano
-        result = DefWindowProc(window, message, wParam, lParam);
-    }
+        case WM_ACTIVATEAPP:
+        {
+            OutputDebugStringA("WM_ACTIVATEAPP\n");
+        } break;
+
+        default:
+        {
+            // callback di default di windows per gestire
+            // messaggi che non mi interessano
+            result = DefWindowProc(window, message, wParam, lParam);
+        }
     }
 
     return result;
@@ -194,6 +193,7 @@ int CALLBACK WinMain(
     int showCmd)
 {
     WNDCLASSA windowClass = {};
+    windowClass.style = CS_HREDRAW | CS_VREDRAW;
     windowClass.lpfnWndProc = win32MainWindowCallback;
     windowClass.hInstance = instance;
     // windowClass.hIcon;
@@ -211,7 +211,7 @@ int CALLBACK WinMain(
     // da qualche parte che conosce.
     if (RegisterClassA(&windowClass))
     {
-        HWND windowHandle = CreateWindowExA(
+        HWND window = CreateWindowExA(
             0,
             windowClass.lpszClassName,
             "handmade hero",
@@ -227,7 +227,7 @@ int CALLBACK WinMain(
             instance,
             0);
 
-        if (windowHandle)
+        if (window)
         {
             int XOffset = 0;
             int YOffset = 0;
@@ -253,15 +253,15 @@ int CALLBACK WinMain(
                     DispatchMessage(&message);  // invoca la callback
                 }
 
-                renderGradient(XOffset, YOffset);
+                renderGradient(globalBackbuffer, XOffset, YOffset);
 
-                HDC deviceContext = GetDC(windowHandle);
+                HDC deviceContext = GetDC(window);
                 RECT clientRect;
-                GetClientRect(windowHandle, &clientRect);
+                GetClientRect(window, &clientRect);
                 int width = clientRect.right - clientRect.left;
                 int height = clientRect.bottom - clientRect.top;
-                win32UpdateWindow(deviceContext, &clientRect, 0, 0, width, height);
-                ReleaseDC(windowHandle, deviceContext);
+                win32CopyBufferToWindow(globalBackbuffer, deviceContext, clientRect, 0, 0, width, height);
+                ReleaseDC(window, deviceContext);
 
                 XOffset++;
                 YOffset++;
