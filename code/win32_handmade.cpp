@@ -24,10 +24,28 @@ struct win32OffscreenBuffer {
     int stride;
 };
 
+struct win32WindowDimension {
+    int width;
+    int height;
+};
+
 // TODO: a global for now
 global_variable bool running;
 global_variable win32OffscreenBuffer globalBackbuffer;
 
+internal win32WindowDimension win32GetWindowDimension(HWND window) {
+    win32WindowDimension dims;
+
+    // getClientRect(), diversametne da rcPaint, restituisce le dimensioni
+    // totali dell'area interna della finestra (escludendo i bordi, la
+    // barra del titolo e i menu) e non solo la zona dirty
+    RECT clientRect;
+    GetClientRect(window, &clientRect);
+    dims.width = clientRect.right - clientRect.left;
+    dims.height = clientRect.bottom - clientRect.top;
+
+    return dims;
+}
 
 internal void
 renderGradient(win32OffscreenBuffer buffer, int XOffset, int YOffset)
@@ -84,18 +102,15 @@ win32ResizeDIBSection(win32OffscreenBuffer* buffer, int width, int height)
 }
 
 internal void
-win32CopyBufferToWindow(win32OffscreenBuffer buffer, HDC deviceContext, RECT clientRect, int X, int Y, int width, int height)
+win32CopyBufferToWindow(HDC deviceContext, win32OffscreenBuffer buffer, int windowWidth, int windowHeight)
 {
-    int windowWidth = clientRect.right - clientRect.left;
-    int windowHeight = clientRect.bottom - clientRect.top;
+    // TODO: aspect ratio correction
+    // TODO: lo stretch fa un po' schifo
+
     // copia i bit da un buffer e li disegna nel DC
     // applicando opportuno stretch
     int res = StretchDIBits(
         deviceContext,
-        // dirty window redraw
-        // X, Y, width, height, // dst
-        // X, Y, width, height, // src
-        // full window redraw
         0, 0, windowWidth, windowHeight, // dst
         0, 0, buffer.width, buffer.height, // src
         buffer.memory,
@@ -118,12 +133,6 @@ LRESULT CALLBACK win32MainWindowCallback(
         case WM_SIZE:
         {
             OutputDebugStringA("WM_SIZE\n");
-
-            RECT clientRect;
-            GetClientRect(window, &clientRect);
-            int width = clientRect.right - clientRect.left;
-            int height = clientRect.bottom - clientRect.top;
-            win32ResizeDIBSection(&globalBackbuffer, width, height);
         } break;
 
         // messaggio inviato quando è necessario ridisegnare la
@@ -144,17 +153,8 @@ LRESULT CALLBACK win32MainWindowCallback(
             // ha anche delle coordinate X,Y come punto d'inizio)
             PAINTSTRUCT paint;
             HDC deviceContext = BeginPaint(window, &paint);
-            int X = paint.rcPaint.left;
-            int Y = paint.rcPaint.top;
-            int width = paint.rcPaint.right - paint.rcPaint.left;
-            int height = paint.rcPaint.bottom - paint.rcPaint.top;
-
-            // getClientRect(), diversametne da rcPaint, restituisce le dimensioni
-            // totali dell'area interna della finestra (escludendo i bordi, la
-            // barra del titolo e i menu) e non solo la zona dirty
-            RECT clientRect;
-            GetClientRect(window, &clientRect);
-            win32CopyBufferToWindow(globalBackbuffer, deviceContext, clientRect, X, Y, width, height);
+            win32WindowDimension dims = win32GetWindowDimension(window);
+            win32CopyBufferToWindow(deviceContext, globalBackbuffer, dims.width, dims.height);
             EndPaint(window, &paint);
         } break;
 
@@ -229,6 +229,9 @@ int CALLBACK WinMain(
 
         if (window)
         {
+            // creiamo il nostro backbuffer fisso
+            win32ResizeDIBSection(&globalBackbuffer, 1280, 720);
+
             int XOffset = 0;
             int YOffset = 0;
 
@@ -256,15 +259,12 @@ int CALLBACK WinMain(
                 renderGradient(globalBackbuffer, XOffset, YOffset);
 
                 HDC deviceContext = GetDC(window);
-                RECT clientRect;
-                GetClientRect(window, &clientRect);
-                int width = clientRect.right - clientRect.left;
-                int height = clientRect.bottom - clientRect.top;
-                win32CopyBufferToWindow(globalBackbuffer, deviceContext, clientRect, 0, 0, width, height);
+                win32WindowDimension dims = win32GetWindowDimension(window);
+                win32CopyBufferToWindow(deviceContext, globalBackbuffer, dims.width, dims.height);
                 ReleaseDC(window, deviceContext);
 
-                XOffset++;
-                YOffset++;
+                XOffset--;
+                YOffset--;
             }
         }
         else
