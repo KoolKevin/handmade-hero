@@ -29,6 +29,10 @@ struct win32WindowDimension {
     int height;
 };
 
+
+global_variable int XOffset;
+global_variable int YOffset;
+
 // TODO: a global for now
 global_variable bool running;
 global_variable win32OffscreenBuffer globalBackbuffer;
@@ -135,6 +139,61 @@ LRESULT CALLBACK win32MainWindowCallback(
             OutputDebugStringA("WM_SIZE\n");
         } break;
 
+        case WM_SYSKEYDOWN:
+        case WM_SYSKEYUP:
+        case WM_KEYDOWN:
+        case WM_KEYUP:
+        {
+            uint32 VKCode = wParam; // VK == Virtual Key
+            bool wasDown = ((lParam & (1 << 30)) != 0);
+            bool isDown = ((lParam & (1 << 31)) == 0);
+            if (!isDown) {
+                break;
+            }
+
+            switch(VKCode) {
+                case 'W': {
+                    YOffset+=10;
+                } break;
+
+                case 'A': {
+                    XOffset+=10;
+                } break;
+
+                case 'S': {
+                    YOffset-=10;
+                } break;
+
+                case 'D': {
+                    XOffset-=10;
+                } break;
+
+                case 'Q': {
+                } break;
+
+                case 'E': {
+                } break;
+
+                case VK_UP: {
+                } break;
+
+                case VK_LEFT: {
+                } break;
+
+                case VK_DOWN: {
+                } break;
+
+                case VK_RIGHT: {
+                } break;
+
+                case VK_ESCAPE: {
+                } break;
+
+                case VK_SPACE: {
+                } break;
+            }
+        } break;
+
         // messaggio inviato quando è necessario ridisegnare la
         // finestra (e.g. espansione, la spostiamo out-of-view, ...)
         case WM_PAINT:
@@ -232,8 +291,8 @@ int CALLBACK WinMain(
             // creiamo il nostro backbuffer fisso
             win32ResizeDIBSection(&globalBackbuffer, 1280, 720);
 
-            int XOffset = 0;
-            int YOffset = 0;
+            XOffset = 0;
+            YOffset = 0;
 
             // ciclo che recupera i messaggi (eventi) associati alla
             // finestra da una message queue popolata da windows
@@ -263,8 +322,8 @@ int CALLBACK WinMain(
                 win32CopyBufferToWindow(deviceContext, globalBackbuffer, dims.width, dims.height);
                 ReleaseDC(window, deviceContext);
 
-                XOffset--;
-                YOffset--;
+                // XOffset--;
+                // YOffset--;
             }
         }
         else
