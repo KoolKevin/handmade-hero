@@ -59,9 +59,9 @@ internal void win32InitDSound(HWND window, int32 samplesPerSec, int32 bufferSize
             waveFormat.wFormatTag = WAVE_FORMAT_PCM;
             waveFormat.nChannels = 2; // le halfword risiederanno in memoria così: L R L R ...
             waveFormat.nSamplesPerSec = samplesPerSec;
+            waveFormat.wBitsPerSample = 16;
             waveFormat.nBlockAlign = (waveFormat.nChannels * waveFormat.wBitsPerSample) / 8;
             waveFormat.nAvgBytesPerSec = waveFormat.nSamplesPerSec * waveFormat.nBlockAlign;
-            waveFormat.wBitsPerSample = 16;
             waveFormat.cbSize = 0;
 
             if(SUCCEEDED(DirectSound->SetCooperativeLevel(window, DSSCL_PRIORITY))) {
@@ -73,6 +73,7 @@ internal void win32InitDSound(HWND window, int32 samplesPerSec, int32 bufferSize
                 if(SUCCEEDED(DirectSound->CreateSoundBuffer(&bufferDescription, &primaryBuffer, 0))) {
                     if(SUCCEEDED(primaryBuffer->SetFormat(&waveFormat))) {
                         // abbiamo finalmente creato il primary buffer!
+                        OutputDebugStringA("settato il formato del primary buffer\n");
                     } else {
                         // TODO: error
                     }
@@ -92,6 +93,7 @@ internal void win32InitDSound(HWND window, int32 samplesPerSec, int32 bufferSize
             bufferDescription.lpwfxFormat = &waveFormat;
             LPDIRECTSOUNDBUFFER secondaryBuffer;
             if (SUCCEEDED(DirectSound->CreateSoundBuffer(&bufferDescription, &secondaryBuffer, 0))) {
+                OutputDebugStringA("creato il secondary buffer\n");
             }
             else
             {
