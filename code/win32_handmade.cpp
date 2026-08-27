@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <stdint.h>
+#include <dsound.h>
 
 #define global_variable static
 #define local_persistent static
@@ -14,6 +15,8 @@ typedef int8_t int8;
 typedef int16_t int16;
 typedef int32_t int32;
 typedef int64_t int64;
+
+typedef int32 bool32;
 
 struct win32OffscreenBuffer {
     BITMAPINFO info;
@@ -36,6 +39,71 @@ global_variable int YOffset;
 // TODO: a global for now
 global_variable bool running;
 global_variable win32OffscreenBuffer globalBackbuffer;
+
+#define DIRECT_SOUND_CREATE(name) HRESULT WINAPI name(LPCGUID pcGuidDevice, LPDIRECTSOUND *ppDS, LPUNKNOWN pUnkOuter);
+typedef DIRECT_SOUND_CREATE(direct_sound_create);
+#define DirectSoundCreate DirectSoundCreate_
+
+internal void win32InitDSound(HWND window, int32 samplesPerSec, int32 bufferSize) {
+    // carichiamo la libreria DirectSound dinamicamente.
+    // in questo modo, se un utente non ha la libreria
+    // possiamo gestire la situazione e permettergli di
+    // giocare comunque al gioco
+    HMODULE DSoundLibrary = LoadLibraryA("dsound.dll");
+    if (DSoundLibrary) {
+        direct_sound_create* DirectSoundCreate =
+            (direct_sound_create*)GetProcAddress(DSoundLibrary, "DirectSoundCreate");
+        LPDIRECTSOUND DirectSound;
+        if (DirectSoundCreate &&  SUCCEEDED(DirectSoundCreate(0, &DirectSound, 0))) {
+            WAVEFORMATEX waveFormat = {};
+            waveFormat.wFormatTag = WAVE_FORMAT_PCM;
+            waveFormat.nChannels = 2; // le halfword risiederanno in memoria così: L R L R ...
+            waveFormat.nSamplesPerSec = samplesPerSec;
+            waveFormat.nBlockAlign = (waveFormat.nChannels * waveFormat.wBitsPerSample) / 8;
+            waveFormat.nAvgBytesPerSec = waveFormat.nSamplesPerSec * waveFormat.nBlockAlign;
+            waveFormat.wBitsPerSample = 16;
+            waveFormat.cbSize = 0;
+
+            if(SUCCEEDED(DirectSound->SetCooperativeLevel(window, DSSCL_PRIORITY))) {
+                // create primary buffer
+                DSBUFFERDESC bufferDescription = {};
+                bufferDescription.dwSize = sizeof(bufferDescription);
+                bufferDescription.dwFlags = DSBCAPS_PRIMARYBUFFER;
+                LPDIRECTSOUNDBUFFER primaryBuffer;
+                if(SUCCEEDED(DirectSound->CreateSoundBuffer(&bufferDescription, &primaryBuffer, 0))) {
+                    if(SUCCEEDED(primaryBuffer->SetFormat(&waveFormat))) {
+                        // abbiamo finalmente creato il primary buffer!
+                    } else {
+                        // TODO: error
+                    }
+                } else {
+                    // TODO: error
+                }
+            } else {
+                // TODO: error
+            }
+
+            // create secondary buffer, the one where we actually write the
+            // stuff we want to play
+            DSBUFFERDESC bufferDescription = {};
+            bufferDescription.dwSize = sizeof(bufferDescription);
+            bufferDescription.dwFlags = 0;
+            bufferDescription.dwBufferBytes = bufferSize;
+            bufferDescription.lpwfxFormat = &waveFormat;
+            LPDIRECTSOUNDBUFFER secondaryBuffer;
+            if (SUCCEEDED(DirectSound->CreateSoundBuffer(&bufferDescription, &secondaryBuffer, 0))) {
+            }
+            else
+            {
+                // TODO: error
+            }
+        } else {
+            // TODO: error
+        }
+    } else {
+        // TODO: error
+    }
+}
 
 internal win32WindowDimension win32GetWindowDimension(HWND window) {
     win32WindowDimension dims;
@@ -145,8 +213,8 @@ LRESULT CALLBACK win32MainWindowCallback(
         case WM_KEYUP:
         {
             uint32 VKCode = wParam; // VK == Virtual Key
-            bool wasDown = ((lParam & (1 << 30)) != 0);
-            bool isDown = ((lParam & (1 << 31)) == 0);
+            bool32 wasDown = ((lParam & (1 << 30)) != 0);
+            bool32 isDown = ((lParam & (1 << 31)) == 0);
             if (!isDown) {
                 break;
             }
@@ -191,6 +259,11 @@ LRESULT CALLBACK win32MainWindowCallback(
 
                 case VK_SPACE: {
                 } break;
+            }
+
+            bool32 altWasDown = ((lParam & (1 << 29)));
+            if(VKCode == VK_F4 && altWasDown) {
+                running = false;
             }
         } break;
 
@@ -293,6 +366,8 @@ int CALLBACK WinMain(
 
             XOffset = 0;
             YOffset = 0;
+
+            win32InitDSound(window, 48000, 48000*sizeof(int16)*2);
 
             // ciclo che recupera i messaggi (eventi) associati alla
             // finestra da una message queue popolata da windows
