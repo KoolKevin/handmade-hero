@@ -64,6 +64,9 @@ internal void win32InitDSound(HWND window, int32 samplesPerSec, int32 bufferSize
             waveFormat.nAvgBytesPerSec = waveFormat.nSamplesPerSec * waveFormat.nBlockAlign;
             waveFormat.cbSize = 0;
 
+            // creiamo due buffer perchè "windows is weird". Il primo è più una handle
+            // alla scheda audio per configurazione (setFormat()). Il secondo è il buffer
+            // vero e proprio in cui scriviamo i dati da suonare
             if(SUCCEEDED(DirectSound->SetCooperativeLevel(window, DSSCL_PRIORITY))) {
                 // create primary buffer
                 DSBUFFERDESC bufferDescription = {};
@@ -169,7 +172,7 @@ win32ResizeDIBSection(win32OffscreenBuffer* buffer, int width, int height)
     // 3 bytes of data + 1 for word alignment
     buffer->bytesPerPixel = 4;
     int bitmapMemorySize = buffer->bytesPerPixel * width * height;
-    buffer->memory = VirtualAlloc(0, bitmapMemorySize, MEM_COMMIT, PAGE_READWRITE);
+    buffer->memory = VirtualAlloc(0, bitmapMemorySize, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
     buffer->stride = width * buffer->bytesPerPixel;
 
     // TODO: probably want to clear this to black
