@@ -32,23 +32,24 @@ struct win32WindowDimension {
     int height;
 };
 
-
+// globals aren't that much of a problem if
+// - you understand why you're using a global
+// - the global should stay global
+// - there is only one of them
+global_variable win32OffscreenBuffer globalBackbuffer;
+global_variable LPDIRECTSOUNDBUFFER secondaryBuffer;
+global_variable bool running;
 global_variable int XOffset;
 global_variable int YOffset;
-
-// TODO: a global for now
-global_variable bool running;
-global_variable win32OffscreenBuffer globalBackbuffer;
 
 #define DIRECT_SOUND_CREATE(name) HRESULT WINAPI name(LPCGUID pcGuidDevice, LPDIRECTSOUND *ppDS, LPUNKNOWN pUnkOuter);
 typedef DIRECT_SOUND_CREATE(direct_sound_create);
 #define DirectSoundCreate DirectSoundCreate_
 
 internal void win32InitDSound(HWND window, int32 samplesPerSec, int32 bufferSize) {
-    // carichiamo la libreria DirectSound dinamicamente.
-    // in questo modo, se un utente non ha la libreria
-    // possiamo gestire la situazione e permettergli di
-    // giocare comunque al gioco
+    // carichiamo la libreria DirectSound dinamicamente. In questo modo, se un
+    // utente non ha la libreria possiamo gestire la situazione e permettergli
+    // di giocare comunque al gioco
     HMODULE DSoundLibrary = LoadLibraryA("dsound.dll");
     if (DSoundLibrary) {
         direct_sound_create* DirectSoundCreate =
@@ -68,10 +69,13 @@ internal void win32InitDSound(HWND window, int32 samplesPerSec, int32 bufferSize
             // alla scheda audio per configurazione (setFormat()). Il secondo è il buffer
             // vero e proprio in cui scriviamo i dati da suonare
             if(SUCCEEDED(DirectSound->SetCooperativeLevel(window, DSSCL_PRIORITY))) {
-                // create primary buffer
+                // create primary buffer (bugia, non è un buffer, solo una handle
+                // per configurare la scheda audio specificando il sound format
+                // del audio che vogliamo suonare)
                 DSBUFFERDESC bufferDescription = {};
                 bufferDescription.dwSize = sizeof(bufferDescription);
-                bufferDescription.dwFlags = DSBCAPS_PRIMARYBUFFER;
+                // special-secret buffer that's really a handle
+                bufferDescription.dwFlags = DSBCAPS_PRIMARYBUFFER; 
                 LPDIRECTSOUNDBUFFER primaryBuffer;
                 if(SUCCEEDED(DirectSound->CreateSoundBuffer(&bufferDescription, &primaryBuffer, 0))) {
                     if(SUCCEEDED(primaryBuffer->SetFormat(&waveFormat))) {
@@ -94,7 +98,6 @@ internal void win32InitDSound(HWND window, int32 samplesPerSec, int32 bufferSize
             bufferDescription.dwFlags = 0;
             bufferDescription.dwBufferBytes = bufferSize;
             bufferDescription.lpwfxFormat = &waveFormat;
-            LPDIRECTSOUNDBUFFER secondaryBuffer;
             if (SUCCEEDED(DirectSound->CreateSoundBuffer(&bufferDescription, &secondaryBuffer, 0))) {
                 OutputDebugStringA("creato il secondary buffer\n");
             }
@@ -372,13 +375,23 @@ int CALLBACK WinMain(
             XOffset = 0;
             YOffset = 0;
 
-            win32InitDSound(window, 48000, 48000*sizeof(int16)*2);
+            int seconds = 1;
+            int sampleRate = 48000;
+            int bytesPerSample = sizeof(int16)*2;
+            int secondaryBufferSize = sampleRate*bytesPerSample*seconds;
+
+            win32InitDSound(window, sampleRate, secondaryBufferSize);
+            secondaryBuffer->Play(0, 0, DSBPLAY_LOOPING);
+
+            uint32 runningSampleIndex = 0;
+            int hz = 256;
+            int squareWavePeriod = sampleRate / hz;
+            int halfSquareWavePeriod = squareWavePeriod / 2;
 
             // ciclo che recupera i messaggi (eventi) associati alla
             // finestra da una message queue popolata da windows
             running = true;
-            while (running)
-            {
+            while (running) {
                 // Se la funzione recupera un messaggio diverso da WM_QUIT,
                 // il valore restituito è diverso da zero.  Se la funzione
                 // recupera il messaggio WM_QUIT, il valore restituito è zero.
@@ -402,8 +415,63 @@ int CALLBACK WinMain(
                 win32CopyBufferToWindow(deviceContext, globalBackbuffer, dims.width, dims.height);
                 ReleaseDC(window, deviceContext);
 
-                // XOffset--;
-                // YOffset--;
+                // test per directsound output
+                DWORD playCursor;
+                DWORD writeCursor;
+                if (SUCCEEDED(secondaryBuffer->GetCurrentPosition(&playCursor, &writeCursor))) {
+
+                    // write pointer
+                    DWORD byteToLock = (runningSampleIndex*bytesPerSample) % secondaryBufferSize;
+                    // we want to write until (and not over) the play cursor
+                    DWORD bytesToWrite;
+
+                    if (byteToLock > playCursor)
+                        bytesToWrite = (secondaryBufferSize - byteToLock) + playCursor;
+                    else
+                        bytesToWrite = playCursor - byteToLock;
+
+                    VOID* region1;
+                    DWORD region1Size;
+                    VOID* region2;
+                    DWORD region2Size;
+                    
+
+                    if (SUCCEEDED(secondaryBuffer->Lock(
+                            byteToLock, bytesToWrite,
+                            &region1, &region1Size,
+                            &region2, &region2Size,
+                            0)))
+                    {
+                        int16* sampleOut = (int16*)region1;
+                        DWORD region1Samplecount = region1Size / bytesPerSample;
+                        for (DWORD sampleIndex = 0; sampleIndex < region1Samplecount; sampleIndex++) {
+                            int16 sampleValue = ((runningSampleIndex / halfSquareWavePeriod) % 2) ? 16000 : -16000;
+
+                            *sampleOut = sampleValue; // left 
+                            sampleOut++;
+                            *sampleOut = sampleValue; // right 
+                            sampleOut++;
+
+                            runningSampleIndex++;
+                        }
+
+                        sampleOut = (int16*)region2;
+                        DWORD region2Samplecount = region2Size / bytesPerSample;
+                        for (DWORD sampleIndex = 0; sampleIndex < region2Samplecount; sampleIndex++) {
+                            int16 sampleValue = ((runningSampleIndex / halfSquareWavePeriod) % 2) ? 16000 : -16000;
+
+                            *sampleOut = sampleValue; // left 
+                            sampleOut++;
+                            *sampleOut = sampleValue; // right 
+                            sampleOut++;
+
+                            runningSampleIndex++;
+                        }
+
+                        secondaryBuffer->Unlock(region1, region1Size, region2, region2Size);
+                    }
+                }
+
             }
         }
         else
