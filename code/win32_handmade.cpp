@@ -489,9 +489,7 @@ int CALLBACK WinMain(
                         (soundOutput.runningSampleIndex*soundOutput.bytesPerSample) % soundOutput.secondaryBufferSize;
                     // we want to write until (and not over) the play cursor
                     DWORD bytesToWrite;
-                    if (byteToLock == playCursor)
-                        bytesToWrite = 0;
-                    else if (byteToLock > playCursor)
+                    if (byteToLock > playCursor)
                         bytesToWrite = (soundOutput.secondaryBufferSize - byteToLock) + playCursor;
                     else
                         bytesToWrite = playCursor - byteToLock;
