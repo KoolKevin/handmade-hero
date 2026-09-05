@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <dsound.h>
 #include <math.h>
 
@@ -395,6 +396,9 @@ int CALLBACK WinMain(
     LPSTR cmdLine,
     int showCmd)
 {
+    LARGE_INTEGER performanceCounterFrequency;
+    QueryPerformanceFrequency(&performanceCounterFrequency);
+
     WNDCLASSA windowClass = {};
     windowClass.style = CS_HREDRAW | CS_VREDRAW;
     windowClass.lpfnWndProc = win32MainWindowCallback;
@@ -455,8 +459,12 @@ int CALLBACK WinMain(
 
             // ciclo che recupera i messaggi (eventi) associati alla
             // finestra da una message queue popolata da windows
+            LARGE_INTEGER lastCounter;
+            QueryPerformanceCounter(&lastCounter);
+            uint64 lastCycleCount = __rdtsc();
             running = true;
             while (running) {
+
                 // Se la funzione recupera un messaggio diverso da WM_QUIT,
                 // il valore restituito è diverso da zero.  Se la funzione
                 // recupera il messaggio WM_QUIT, il valore restituito è zero.
@@ -496,6 +504,22 @@ int CALLBACK WinMain(
 
                     win32FillSoundBuffer(&soundOutput, byteToLock, bytesToWrite);
                 }
+
+                LARGE_INTEGER endCounter;
+                QueryPerformanceCounter(&endCounter);
+                int64 counterElapsed = endCounter.QuadPart - lastCounter.QuadPart;
+                float msPerFrame = (float)(1000.0f*counterElapsed) / (float)performanceCounterFrequency.QuadPart;
+
+                uint64 endCycleCount = __rdtsc();
+                uint64 cyclesElapsed = endCycleCount - lastCycleCount;
+                float MCyclesPerFrame = (float)cyclesElapsed / (1000.0f * 1000.0f);
+
+                char buffer[256];
+                sprintf(buffer, "ms/frame: %f, Mcycles/frame: %f\n", msPerFrame, MCyclesPerFrame);
+                OutputDebugStringA(buffer);
+
+                lastCounter = endCounter;
+                lastCycleCount = endCycleCount;
             }
         }
         else
