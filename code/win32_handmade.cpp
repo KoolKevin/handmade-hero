@@ -4,6 +4,8 @@
 #include <dsound.h>
 #include <math.h>
 
+#include "handmade.h"
+
 #define global_variable static
 #define local_persistent static
 #define internal static
@@ -46,7 +48,6 @@ struct win32SoundOutput {
     int wavePeriod;
 };
 
-
 // globals aren't that much of a problem if
 // - you understand why you're using a global
 // - the global should stay global
@@ -60,6 +61,8 @@ global_variable int YOffset;
 #define DIRECT_SOUND_CREATE(name) HRESULT WINAPI name(LPCGUID pcGuidDevice, LPDIRECTSOUND *ppDS, LPUNKNOWN pUnkOuter);
 typedef DIRECT_SOUND_CREATE(direct_sound_create);
 #define DirectSoundCreate DirectSoundCreate_
+
+#include "handmade.cpp"
 
 internal void win32InitDSound(HWND window, int32 samplesPerSec, int32 bufferSize) {
     // carichiamo la libreria DirectSound dinamicamente. In questo modo, se un
@@ -191,30 +194,6 @@ internal win32WindowDimension win32GetWindowDimension(HWND window) {
     return dims;
 }
 
-internal void
-renderGradient(win32OffscreenBuffer buffer, int XOffset, int YOffset)
-{
-    // good way to write pixel loops. usiamo esplicitamente un
-    // row pointer aggiuntivo dato che non è detto che il pixel
-    // pointer sia allineato con la prossima riga alla fine del
-    // loop interno
-    uint8 *row = (uint8 *)buffer.memory;
-    for (int Y = 0; Y < buffer.height; Y++)
-    {
-        uint32 *pixel = (uint32 *)row;
-        for (int X = 0; X < buffer.width; X++)
-        {
-            uint8 red = (uint8)(X + XOffset);
-            uint8 green = (uint8)(Y + YOffset);
-
-            // BGR windows pixel layout
-            *pixel = red << 16 | green << 8;
-            pixel++;
-        }
-
-        row += buffer.stride;
-    }
-}
 
 // DIB == DeviceIndipendentBitmap
 //     == buffer in cui scrivere cosa disegnare
@@ -481,7 +460,12 @@ int CALLBACK WinMain(
                     DispatchMessage(&message);  // invoca la callback
                 }
 
-                renderGradient(globalBackbuffer, XOffset, YOffset);
+                gameOffscreenBuffer buffer = {};
+                buffer.memory = globalBackbuffer.memory;
+                buffer.width = globalBackbuffer.width;
+                buffer.height = globalBackbuffer.height;
+                buffer.stride = globalBackbuffer.stride;
+                gameUpdateAndRender(&buffer);
 
                 HDC deviceContext = GetDC(window);
                 win32WindowDimension dims = win32GetWindowDimension(window);
@@ -514,9 +498,9 @@ int CALLBACK WinMain(
                 uint64 cyclesElapsed = endCycleCount - lastCycleCount;
                 float MCyclesPerFrame = (float)cyclesElapsed / (1000.0f * 1000.0f);
 
-                char buffer[256];
-                sprintf(buffer, "ms/frame: %f, Mcycles/frame: %f\n", msPerFrame, MCyclesPerFrame);
-                OutputDebugStringA(buffer);
+                char charBuffer[256];
+                sprintf(charBuffer, "ms/frame: %f, Mcycles/frame: %f\n", msPerFrame, MCyclesPerFrame);
+                OutputDebugStringA(charBuffer);
 
                 lastCounter = endCounter;
                 lastCycleCount = endCycleCount;
