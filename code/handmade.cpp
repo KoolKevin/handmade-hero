@@ -25,8 +25,6 @@ renderGradient(gameOffscreenBuffer* buffer, int XOffset, int YOffset)
     }
 }
 
-void gameUpdateAndRender(gameOffscreenBuffer* buffer) {
-    int XOffset = 0;
-    int YOffset = 0;
+void gameUpdateAndRender(gameOffscreenBuffer* buffer, int XOffset, int YOffset) {
     renderGradient(buffer, XOffset, YOffset);
 }

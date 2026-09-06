@@ -1,10 +1,4 @@
-#include <windows.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <dsound.h>
-#include <math.h>
-
-#include "handmade.h"
 
 #define global_variable static
 #define local_persistent static
@@ -21,7 +15,15 @@ typedef int16_t int16;
 typedef int32_t int32;
 typedef int64_t int64;
 
-typedef int32 bool32;
+// better to put platform indipendent code at the top
+// so that, for example, windows can't interfer with
+// its #defines, typedefs, etc
+#include "handmade.cpp"
+
+#include <windows.h>
+#include <stdio.h>
+#include <dsound.h>
+#include <math.h>
 
 struct win32OffscreenBuffer {
     BITMAPINFO info;
@@ -62,7 +64,6 @@ global_variable int YOffset;
 typedef DIRECT_SOUND_CREATE(direct_sound_create);
 #define DirectSoundCreate DirectSoundCreate_
 
-#include "handmade.cpp"
 
 internal void win32InitDSound(HWND window, int32 samplesPerSec, int32 bufferSize) {
     // carichiamo la libreria DirectSound dinamicamente. In questo modo, se un
@@ -264,8 +265,8 @@ LRESULT CALLBACK win32MainWindowCallback(
         case WM_KEYUP:
         {
             uint32 VKCode = wParam; // VK == Virtual Key
-            bool32 wasDown = ((lParam & (1 << 30)) != 0);
-            bool32 isDown = ((lParam & (1 << 31)) == 0);
+            bool wasDown = ((lParam & (1 << 30)) != 0);
+            bool isDown = ((lParam & (1 << 31)) == 0);
             if (!isDown) {
                 break;
             }
@@ -312,7 +313,7 @@ LRESULT CALLBACK win32MainWindowCallback(
                 } break;
             }
 
-            bool32 altWasDown = ((lParam & (1 << 29)));
+            bool altWasDown = ((lParam & (1 << 29)));
             if(VKCode == VK_F4 && altWasDown) {
                 running = false;
             }
@@ -465,7 +466,7 @@ int CALLBACK WinMain(
                 buffer.width = globalBackbuffer.width;
                 buffer.height = globalBackbuffer.height;
                 buffer.stride = globalBackbuffer.stride;
-                gameUpdateAndRender(&buffer);
+                gameUpdateAndRender(&buffer, XOffset, YOffset);
 
                 HDC deviceContext = GetDC(window);
                 win32WindowDimension dims = win32GetWindowDimension(window);

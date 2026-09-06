@@ -11,7 +11,7 @@ struct gameOffscreenBuffer {
     int stride;
 };
 
-void gameUpdateAndRender(gameOffscreenBuffer* buffer);
+void gameUpdateAndRender(gameOffscreenBuffer* buffer, int XOffset, int YOffset);
 
 /*
     Services that the platform layer provides to the the game
